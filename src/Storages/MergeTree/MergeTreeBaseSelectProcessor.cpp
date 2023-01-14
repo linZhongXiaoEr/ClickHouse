@@ -89,8 +89,8 @@ std::unique_ptr<PrewhereExprInfo> IMergeTreeSelectAlgorithm::getPrewhereActions(
         {
             PrewhereExprStep row_level_filter_step
             {
-                .actions = std::make_shared<ExpressionActions>(prewhere_info->row_level_filter, actions_settings),
-                .column_name = prewhere_info->row_level_column_name,
+                .actions = std::make_shared<ExpressionActions>(prewhere_info->row_level_filter->actions, actions_settings),
+                .column_name = prewhere_info->row_level_filter->column_name,
                 .remove_column = true,
                 .need_filter = true
             };
@@ -98,15 +98,18 @@ std::unique_ptr<PrewhereExprInfo> IMergeTreeSelectAlgorithm::getPrewhereActions(
             prewhere_actions->steps.emplace_back(std::move(row_level_filter_step));
         }
 
-        PrewhereExprStep prewhere_step
+        for (const auto & step : prewhere_info->prewhere_steps)
         {
-            .actions = std::make_shared<ExpressionActions>(prewhere_info->prewhere_actions, actions_settings),
-            .column_name = prewhere_info->prewhere_column_name,
-            .remove_column = prewhere_info->remove_prewhere_column,
-            .need_filter = prewhere_info->need_filter
-        };
+            PrewhereExprStep prewhere_step
+            {
+                .actions = std::make_shared<ExpressionActions>(step.actions, actions_settings),
+                .column_name = step.column_name,
+                .remove_column = step.remove_prewhere_column,
+                .need_filter = step.need_filter
+            };
 
-        prewhere_actions->steps.emplace_back(std::move(prewhere_step));
+            prewhere_actions->steps.emplace_back(std::move(prewhere_step));
+        }
     }
 
     return prewhere_actions;
@@ -623,39 +626,42 @@ Block IMergeTreeSelectAlgorithm::applyPrewhereActions(Block block, const Prewher
     {
         if (prewhere_info->row_level_filter)
         {
-            block = prewhere_info->row_level_filter->updateHeader(std::move(block));
-            auto & row_level_column = block.getByName(prewhere_info->row_level_column_name);
+            block = prewhere_info->row_level_filter->actions->updateHeader(std::move(block));
+            auto & row_level_column = block.getByName(prewhere_info->row_level_filter->column_name);
             if (!row_level_column.type->canBeUsedInBooleanContext())
             {
                 throw Exception("Invalid type for filter in PREWHERE: " + row_level_column.type->getName(),
                     ErrorCodes::ILLEGAL_TYPE_OF_COLUMN_FOR_FILTER);
             }
 
-            block.erase(prewhere_info->row_level_column_name);
+            block.erase(prewhere_info->row_level_filter->column_name);
         }
 
-        if (prewhere_info->prewhere_actions)
-            block = prewhere_info->prewhere_actions->updateHeader(std::move(block));
-
-        auto & prewhere_column = block.getByName(prewhere_info->prewhere_column_name);
-        if (!prewhere_column.type->canBeUsedInBooleanContext())
+        for (const auto & step : prewhere_info->prewhere_steps)
         {
-            throw Exception("Invalid type for filter in PREWHERE: " + prewhere_column.type->getName(),
-                ErrorCodes::ILLEGAL_TYPE_OF_COLUMN_FOR_FILTER);
-        }
+            if (step.actions)
+                block = step.actions->updateHeader(std::move(block));
 
-        if (prewhere_info->remove_prewhere_column)
-            block.erase(prewhere_info->prewhere_column_name);
-        else
-        {
-            WhichDataType which(removeNullable(recursiveRemoveLowCardinality(prewhere_column.type)));
-            if (which.isNativeInt() || which.isNativeUInt())
-                prewhere_column.column = prewhere_column.type->createColumnConst(block.rows(), 1u)->convertToFullColumnIfConst();
-            else if (which.isFloat())
-                prewhere_column.column = prewhere_column.type->createColumnConst(block.rows(), 1.0f)->convertToFullColumnIfConst();
+            auto & prewhere_column = block.getByName(step.column_name);
+            if (!prewhere_column.type->canBeUsedInBooleanContext())
+            {
+                throw Exception("Invalid type for filter in PREWHERE: " + prewhere_column.type->getName(),
+                    ErrorCodes::ILLEGAL_TYPE_OF_COLUMN_FOR_FILTER);
+            }
+
+            if (step.remove_prewhere_column)
+                block.erase(step.column_name);
             else
-                throw Exception(
-                    ErrorCodes::ILLEGAL_TYPE_OF_COLUMN_FOR_FILTER, "Illegal type {} of column for filter", prewhere_column.type->getName());
+            {
+                WhichDataType which(removeNullable(recursiveRemoveLowCardinality(prewhere_column.type)));
+                if (which.isNativeInt() || which.isNativeUInt())
+                    prewhere_column.column = prewhere_column.type->createColumnConst(block.rows(), 1u)->convertToFullColumnIfConst();
+                else if (which.isFloat())
+                    prewhere_column.column = prewhere_column.type->createColumnConst(block.rows(), 1.0f)->convertToFullColumnIfConst();
+                else
+                    throw Exception(
+                        ErrorCodes::ILLEGAL_TYPE_OF_COLUMN_FOR_FILTER, "Illegal type {} of column for filter", prewhere_column.type->getName());
+            }
         }
     }
 
