@@ -261,3 +261,13 @@ FROM
     ORDER BY number DESC
 )
 ORDER BY number ASC;
+
+SELECT '-- no bug with full_sorting_merge';
+SELECT sum(number) == 5
+FROM ( SELECT number FROM numbers(1, 3) GROUP BY number ORDER BY number ) js1
+JOIN ( SELECT number FROM numbers(2, 4) GROUP BY number ORDER BY number ) js2
+USING number
+SETTINGS join_algorithm = 'full_sorting_merge',
+         allow_experimental_analyzer = 0,
+         optimize_sorting_by_input_stream_properties = 1,
+         query_plan_remove_redundant_sorting = 1;

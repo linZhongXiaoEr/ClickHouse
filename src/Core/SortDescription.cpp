@@ -73,6 +73,14 @@ SortDescription commonPrefix(const SortDescription & lhs, const SortDescription 
     return res;
 }
 
+String SortDescription::toString() const
+{
+    Strings res;
+    for (const auto & desc : *this)
+        res.push_back(desc.dump());
+    return fmt::format("[{}]{}", fmt::join(res, ", "), compile_sort_description ? "(compiled)" : "");
+}
+
 #if USE_EMBEDDED_COMPILER
 
 static CHJIT & getJITInstance()

@@ -281,7 +281,7 @@ void SortingStep::transformPipeline(QueryPipelineBuilder & pipeline, const Build
     if (optimize_sorting_by_input_stream_properties)
     {
         /// skip sorting if stream is already sorted
-        if (input_sort_mode == DataStream::SortScope::Global && input_sort_desc.hasPrefix(result_description))
+        if (input_sort_mode == DataStream::SortScope::Global && pipeline.getNumStreams() == 1 && input_sort_desc.hasPrefix(result_description))
             return;
 
         /// merge sorted

@@ -33,6 +33,18 @@ QueryPipelineBuilderPtr JoinStep::updatePipeline(QueryPipelineBuilders pipelines
     if (pipelines.size() != 2)
         throw Exception(ErrorCodes::LOGICAL_ERROR, "JoinStep expect two input steps");
 
+    for (size_t i = 0; i < 2; ++i)
+    {
+        if (pipelines[i]->getNumStreams() == 1 )
+            continue;
+        throw Exception(ErrorCodes::LOGICAL_ERROR,
+            "Join is supported only for pipelines with one output port, got {} at {}, sort info: {} {}",
+            pipelines[i]->getNumStreams(),
+            i == 0 ? "left" : "right",
+            input_streams[i].sort_scope,
+            input_streams[i].sort_description.toString());
+    }
+
     if (join->pipelineType() == JoinPipelineType::YShaped)
     {
         auto joined_pipeline = QueryPipelineBuilder::joinPipelinesYShaped(
